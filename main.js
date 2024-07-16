@@ -15,8 +15,8 @@ document.addEventListener('DOMContentLoaded', function() {
     let isLoading = false;
     let starredStories = JSON.parse(localStorage.getItem('starredStories')) || {};
 
+    console.log(starredStories);
 
-    // Initial fetch of stories sorted by date
     fetchTopStories(currentSort, currentTimePeriod, currentFilter);
 
     navDivs.forEach(div => {
@@ -80,12 +80,17 @@ document.addEventListener('DOMContentLoaded', function() {
             currentPage++;
             const start = currentPage * storiesPerPage;
             const end = start + storiesPerPage;
-            const paginatedStoryIds = storyIds.slice(start, end);
+            let paginatedStoryIds
 
+            if (currentFilter === "starred"){
+                paginatedStoryIds = storyIds.slice(start,end);
+            }
+            else {
+                paginatedStoryIds = await fetchStoryIds(currentSort,currentTimePeriod,currentFilter,start,end)
+            }
             if (paginatedStoryIds.length > 0) {
                 isLoading = true;
-                const newStoryIds = await fetchStoryIds(currentSort, currentTimePeriod, currentFilter, start, end);
-                await loadStories(newStoryIds, currentSort, currentTimePeriod);
+                await loadStories(paginatedStoryIds, currentSort, currentTimePeriod);
             }
         }
     });
@@ -93,9 +98,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function getStoryDetails(storyId) {
         try {
-            console.log("start")
             const response = await fetch(`https://hacker-news.firebaseio.com/v0/item/${storyId}.json?print=pretty`);
-            console.log("end")
             return await response.json();
         } catch (error) {
             console.error(`Error fetching story ${storyId}:`, error);
@@ -106,12 +109,15 @@ document.addEventListener('DOMContentLoaded', function() {
     async function fetchTopStories(sortBy, timePeriod, filterType) {
         const startTime = performance.now();
         if (filterType === 'starred') {
-            storyIds = Object.keys(starredStories);
-            currentPage = 0;
-            const paginatedStoryIds = storyIds.slice(0, storiesPerPage);
-            loadStories(paginatedStoryIds, sortBy, timePeriod);
+            // Sort starred stories by ID in descending order
+            storyIds = Object.keys(starredStories).sort((a, b) => b - a);
 
-            const endTime = performance.now(); // End timing
+            currentPage = 0;
+            document.querySelector('.list-all').innerHTML = '';
+            const paginatedStoryIds = storyIds.slice(0, storiesPerPage);
+            await loadStories(paginatedStoryIds, sortBy, timePeriod);
+
+            const endTime = performance.now();
             const duration = ((endTime - startTime) / 1000).toFixed(4); // Calculate duration in seconds
             resultsCount.textContent = `${storyIds.length} results (${duration} seconds)`;
             return;
@@ -161,6 +167,9 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     async function fetchStoryIds(sortBy, timePeriod, filterType, start, end) {
+        if(filterType === 'starred'){
+            return storyIds.slice(start, end);
+        }
         const fetchIds = async () => {
             let apiUrl = 'https://hacker-news.firebaseio.com/v0/topstories.json?print=pretty';
             if (filterType === 'hot') {
@@ -289,7 +298,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const timeAgo = formatTime(commentData.time);
         const repliesContainerId = `replies-${commentData.id}`;
 
-        let commentHtml = `
+        return `
         <div class="comment" data-id="${commentData.id}" style="margin-left: ${depth * 20}px; border-left: 1px lightgray solid; border-bottom: 1px #f8f6f6 solid">
             <div class="comment-header">
                 <span class="comment-author">${commentData.by}</span>
@@ -302,7 +311,6 @@ document.addEventListener('DOMContentLoaded', function() {
             <div id="${repliesContainerId}" class="replies-container" style="display: block;"></div>
         </div>
     `;
-        return commentHtml;
     }
 
 
@@ -340,7 +348,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         } else {
             repliesContainer.style.display = 'block';
-            let commentData = await getCommentDetails(commentId);
+            await getCommentDetails(commentId);
             button.textContent = `Hide Replies`;
         }
     }
@@ -368,11 +376,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     <p style="margin: 0;">${storyData.title}</p>
                     <div class="post-details" style="color: gray; font-size: 0.9em;">
                         <span class="heart" data-id="${storyData.id}">
-                            <img src="photos/heart.png" style="width: 15px; vertical-align: middle; margin-right: 5px;">
+                            <img src="photos/heart.png" style="width: 15px; vertical-align: middle; margin-right: 5px;" alt="Heart">
                             <span class="points">${storyData.score}</span> points
                         </span> |
-                        <span><img src="photos/user.png" style="width: 15px; vertical-align: middle; margin-right: 5px;">${storyData.by}</span> |
-                        <span><img src="photos/clock.png" style="width: 15px; vertical-align: middle; margin-right: 5px;">${timeAgo}</span> |
+                        <span><img src="photos/user.png" style="width: 15px; vertical-align: middle; margin-right: 5px;" alt="User">${storyData.by}</span> |
+                        <span><img src="photos/clock.png" style="width: 15px; vertical-align: middle; margin-right: 5px;" alt="Clock">${timeAgo}</span> |
                         <a class="story-url" target="_blank" href="${storyData.url}"><span>${storyData.url ? new URL(storyData.url).hostname : ''}</span></a>
                         <span>${storyData.type}</span>
                     </div>
@@ -475,7 +483,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function toggleHeart(heart) {
-        const storyId = heart.dataset.id;
         const pointsSpan = heart.querySelector('.points');
         const points = parseInt(pointsSpan.textContent, 10);
 
