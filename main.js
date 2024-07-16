@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let isLoading = false;
     let starredStories = JSON.parse(localStorage.getItem('starredStories')) || {};
 
+
     // Initial fetch of stories sorted by date
     fetchTopStories(currentSort, currentTimePeriod, currentFilter);
 
@@ -27,6 +28,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             currentFilter = filterType;
             currentPage = 0; // Reset to the first page
+            document.querySelector('.list-all').innerHTML = '';
             fetchTopStories(currentSort, currentTimePeriod, currentFilter);
 
             // Enable or disable the dropdown based on the filter type
@@ -39,7 +41,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 filterSelect.classList.add('disabled-option');
                 filterSelect.value = 'all';
                 currentFilterType = 'all';
-                fetchTopStories(currentSort, currentTimePeriod, currentFilter);
             }
         });
     });
@@ -51,7 +52,7 @@ document.addEventListener('DOMContentLoaded', function() {
             event.target.classList.add('active');
 
             currentSort = event.target.id === 'sort-by-date' ? 'date' : 'popularity';
-            currentPage = 0; // Reset to the first page
+            currentPage = 0;
             fetchTopStories(currentSort, currentTimePeriod, currentFilter);
         });
     });
@@ -74,37 +75,46 @@ document.addEventListener('DOMContentLoaded', function() {
 
     filterSelect.addEventListener('change', handleFilterChange);
 
-    window.addEventListener('scroll', () => {
+    window.addEventListener('scroll', async () => {
         if ((window.innerHeight + window.scrollY) / document.querySelector('.list-all').scrollHeight >= 0.6 && !isLoading) {
             currentPage++;
             const start = currentPage * storiesPerPage;
             const end = start + storiesPerPage;
             const paginatedStoryIds = storyIds.slice(start, end);
-            loadStories(paginatedStoryIds, currentSort, currentTimePeriod);
+
+            if (paginatedStoryIds.length > 0) {
+                isLoading = true;
+                const newStoryIds = await fetchStoryIds(currentSort, currentTimePeriod, currentFilter, start, end);
+                await loadStories(newStoryIds, currentSort, currentTimePeriod);
+            }
         }
     });
 
+
     async function getStoryDetails(storyId) {
         try {
+            console.log("start")
             const response = await fetch(`https://hacker-news.firebaseio.com/v0/item/${storyId}.json?print=pretty`);
+            console.log("end")
             return await response.json();
         } catch (error) {
             console.error(`Error fetching story ${storyId}:`, error);
         }
     }
 
+
     async function fetchTopStories(sortBy, timePeriod, filterType) {
-        const startTime = performance.now()
+        const startTime = performance.now();
         if (filterType === 'starred') {
-            storyIds = Object.keys(starredStories); // Get the list of starred story IDs
-            currentPage = 0; // Reset to the first page
-            const paginatedStoryIds = storyIds.slice(0, storiesPerPage); // Paginate the list
-            loadStories(paginatedStoryIds, sortBy, timePeriod); // Load the stories
+            storyIds = Object.keys(starredStories);
+            currentPage = 0;
+            const paginatedStoryIds = storyIds.slice(0, storiesPerPage);
+            loadStories(paginatedStoryIds, sortBy, timePeriod);
 
             const endTime = performance.now(); // End timing
             const duration = ((endTime - startTime) / 1000).toFixed(4); // Calculate duration in seconds
             resultsCount.textContent = `${storyIds.length} results (${duration} seconds)`;
-            return; // Exit the function early for 'starred' filter
+            return;
         }
 
         let apiUrl = 'https://hacker-news.firebaseio.com/v0/topstories.json?print=pretty';
@@ -122,41 +132,89 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         try {
-
             const response = await fetch(apiUrl);
-            storyIds = await response.json(); // Fetch story IDs based on the filter
-            currentPage = 0; // Reset to the first page
+            storyIds = await response.json();
+
+            if (filterType !== 'hot') {
+                storyIds.sort((a, b) => b - a);
+            }
+
+            currentPage = 0;
+
+            // Clear previous stories
+            document.querySelector('.list-all').innerHTML = '';
+
             if (storyIds.length === 0) {
                 renderNoStoriesMessage();
+            } else {
+                const paginatedStoryIds = storyIds.slice(0, storiesPerPage);
+                loadStories(paginatedStoryIds, sortBy, timePeriod);
             }
-            else{
-                const paginatedStoryIds = storyIds.slice(0, storiesPerPage); // Paginate the list
-                loadStories(paginatedStoryIds, sortBy, timePeriod); // Load the stories
-            }
+
             const endTime = performance.now(); // End timing
             const duration = ((endTime - startTime) / 1000).toFixed(4)
             resultsCount.textContent = `${storyIds.length} results (${duration} seconds)`;
         } catch (error) {
             console.error('Error fetching stories:', error);
-            renderNoStoriesMessage()
+            renderNoStoriesMessage();
         }
     }
+
+    async function fetchStoryIds(sortBy, timePeriod, filterType, start, end) {
+        const fetchIds = async () => {
+            let apiUrl = 'https://hacker-news.firebaseio.com/v0/topstories.json?print=pretty';
+            if (filterType === 'hot') {
+                apiUrl = 'https://hacker-news.firebaseio.com/v0/newstories.json?print=pretty';
+            } else if (filterType === 'show-hn') {
+                apiUrl = 'https://hacker-news.firebaseio.com/v0/showstories.json?print=pretty';
+            } else if (filterType === 'ask-hn') {
+                apiUrl = 'https://hacker-news.firebaseio.com/v0/askstories.json?print=pretty';
+            } else if (filterType === 'poll') {
+                apiUrl = 'https://hacker-news.firebaseio.com/v0/pollstories.json?print=pretty';
+            } else if (filterType === 'job') {
+                apiUrl = 'https://hacker-news.firebaseio.com/v0/jobstories.json?print=pretty';
+            }
+
+            try {
+                const response = await fetch(apiUrl);
+                const storyIds = await response.json();
+
+
+                if (filterType !== 'hot') {
+                    storyIds.sort((a, b) => b - a);
+                }
+
+                return storyIds.slice(start, end);
+            } catch (error) {
+                console.error('Error fetching story IDs:', error);
+            }
+        };
+
+        return fetchIds();
+    }
+
+
+
 
     async function loadStories(storyIds, sortBy, timePeriod) {
         isLoading = true;
 
-        // Fetch the story details for the given storyIds
-        const storyPromises = storyIds.map(storyId => getStoryDetails(storyId));
-        const stories = await Promise.all(storyPromises);
+        for (let i = 0; i < storyIds.length; i++) {
+            const storyId = storyIds[i];
+            const storyData = await getStoryDetails(storyId);
+            if (storyData) {
+                const filteredStories = filterAndSortStories([storyData], sortBy, timePeriod);
+                renderStories(filteredStories, sortBy);
+                addHeartEventListeners();
+                addStarEventListeners();
+                addCommentEventListeners();
+            }
+        }
 
-        // Filter and sort stories
-        const filteredStories = filterAndSortStories(stories, sortBy, timePeriod);
-        renderStories(filteredStories);
         isLoading = false;
-
-        // Reattach star click listeners after rendering
-        addStarEventListeners(); // Reattach the star event listeners
     }
+
+
 
     function filterAndSortStories(stories, sortBy, timePeriod) {
         const now = new Date();
@@ -219,6 +277,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function getCommentDetails(commentId) {
         try {
+            console.log("getComment")
             const response = await fetch(`https://hacker-news.firebaseio.com/v0/item/${commentId}.json?print=pretty`);
             return await response.json();
         } catch (error) {
@@ -226,7 +285,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-// Function to render a comment and its replies
     function renderComment(commentData, depth = 0) {
         const timeAgo = formatTime(commentData.time);
         const repliesContainerId = `replies-${commentData.id}`;
@@ -241,40 +299,49 @@ document.addEventListener('DOMContentLoaded', function() {
             <div class="comment-actions">
                 ${commentData.kids ? `<span class="replies-btn" data-id="${commentData.id}" data-depth="${depth}">Show Replies (${commentData.kids.length})</span>` : ''}
             </div>
-            <div id="${repliesContainerId}" class="replies-container" style="display: none;"></div>
+            <div id="${repliesContainerId}" class="replies-container" style="display: block;"></div>
         </div>
     `;
         return commentHtml;
     }
 
-// Function to load and render comments recursively
+
     async function loadComments(commentIds, container, depth = 0) {
         for (let commentId of commentIds) {
             const commentData = await getCommentDetails(commentId);
             const commentHtml = renderComment(commentData, depth);
-            container.innerHTML += commentHtml;
+            container.innerHTML += commentHtml
+            console.log("give event")
+            addRepliesEventListeners();
         }
-        addRepliesEventListeners();
+
     }
 
-// Function to handle the show replies button click
+
     async function handleRepliesClick(event) {
+        console.log("reply clicked")
         const button = event.target;
         const commentId = button.dataset.id;
         const depth = parseInt(button.dataset.depth) + 1;
         const repliesContainer = document.getElementById(`replies-${commentId}`);
 
-        if (repliesContainer.style.display === 'none') {
+        if (repliesContainer.style.display === 'block')  {
             const commentData = await getCommentDetails(commentId);
             if (commentData.kids && repliesContainer.innerHTML === '') {
+                button.textContent = `Hide Replies`;
                 await loadComments(commentData.kids, repliesContainer, depth);
+
             }
-            repliesContainer.style.display = 'block';
-            button.textContent = `Hide Replies`;
+            else{
+                repliesContainer.style.display = 'none';
+                button.textContent = `Show Replies (${commentData.kids.length})`;
+            }
+
+
         } else {
-            repliesContainer.style.display = 'none';
+            repliesContainer.style.display = 'block';
             let commentData = await getCommentDetails(commentId);
-            button.textContent = `Show Replies (${commentData.kids.length})`;
+            button.textContent = `Hide Replies`;
         }
     }
 
@@ -284,12 +351,9 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-// Modify the renderStories function to include comment button
-    function renderStories(stories) {
+
+    function renderStories(stories, sortBy) {
         const listAll = document.querySelector('.list-all');
-        if (currentPage === 0) {
-            listAll.innerHTML = ''; // Clear the list if it's the first page
-        }
 
         stories.forEach(storyData => {
             const timeAgo = formatTime(storyData.time);
@@ -297,42 +361,65 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const storyHtml =
                 `
-            <div class="story d-flex flex-column mb-1" data-id="${storyData.id}">
-                <div class="d-flex align-items-start bg-white p-3">
-                    <img class="story-img me-3" src="photos/all.png" alt="Story Image">
-                    <div>
-                        <p style="margin: 0;">${storyData.title}</p>
-                        <div class="post-details" style="color: gray; font-size: 0.9em;">
-                            <span class="heart" data-id="${storyData.id}">
-                                <img src="photos/heart.png" style="width: 15px; vertical-align: middle; margin-right: 5px;">
-                                <span class="points">${storyData.score}</span> points
-                            </span> |
-                            <span><img src="photos/user.png" style="width: 15px; vertical-align: middle; margin-right: 5px;">${storyData.by}</span> |
-                            <span><img src="photos/clock.png" style="width: 15px; vertical-align: middle; margin-right: 5px;">${timeAgo}</span> |
-                            <a class="story-url" target="_blank" href="${storyData.url}"><span>${storyData.url ? new URL(storyData.url).hostname : ''}</span></a>
-                            <span>${storyData.type}</span>
-                        </div>
-                    </div>
-                    <div class="comment-section ms-auto d-flex align-items-center">
-                        <div style="display: inline" class="comment-btn" data-id="${storyData.id}">
-                            <img class="chat" src="photos/chat.png" alt="Chat">
-                            <p style="display: inline" class="comment-button mb-0">${storyData.descendants || 0} comments</p>
-                        </div>
-                        
-                        <img class="share ms-2" src="photos/share.png" alt="Share">
-                        <img class="star ms-2 ${isStarred}" src="photos/star.png" alt="Star">
+        <div class="story d-flex flex-column mb-1" data-id="${storyData.id}" data-score="${storyData.score+storyData.descendants}">
+            <div class="d-flex align-items-start bg-white p-3">
+                <img class="story-img me-3" src="photos/all.png" alt="Story Image">
+                <div>
+                    <p style="margin: 0;">${storyData.title}</p>
+                    <div class="post-details" style="color: gray; font-size: 0.9em;">
+                        <span class="heart" data-id="${storyData.id}">
+                            <img src="photos/heart.png" style="width: 15px; vertical-align: middle; margin-right: 5px;">
+                            <span class="points">${storyData.score}</span> points
+                        </span> |
+                        <span><img src="photos/user.png" style="width: 15px; vertical-align: middle; margin-right: 5px;">${storyData.by}</span> |
+                        <span><img src="photos/clock.png" style="width: 15px; vertical-align: middle; margin-right: 5px;">${timeAgo}</span> |
+                        <a class="story-url" target="_blank" href="${storyData.url}"><span>${storyData.url ? new URL(storyData.url).hostname : ''}</span></a>
+                        <span>${storyData.type}</span>
                     </div>
                 </div>
-                <div class="comments-container bg-white" style="display: none;"></div>
+                <div class="comment-section ms-auto d-flex align-items-center">
+                    <div style="display: inline" class="comment-btn" data-id="${storyData.id}">
+                        <img class="chat" src="photos/chat.png" alt="Chat">
+                        <p style="display: inline" class="comment-button mb-0">${storyData.descendants || 0} comments</p>
+                    </div>
+                    
+                    <img class="share ms-2" src="photos/share.png" alt="Share">
+                    <img class="star ms-2 ${isStarred}" src="photos/star.png" alt="Star">
+                </div>
             </div>
-        `;
-            listAll.innerHTML += storyHtml;
+            <div class="comments-container bg-white" style="display: block;"></div>
+        </div>
+    `;
+
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = storyHtml.trim();
+            const newStoryElement = tempDiv.firstChild;
+
+            if (sortBy === 'popularity') {
+                // Add the new story to the appropriate position based on score
+                let inserted = false;
+                const existingStories = Array.from(listAll.children);
+                for (let i = 0; i < existingStories.length; i++) {
+                    const existingStoryScore = parseInt(existingStories[i].dataset.score, 10);
+                    if (storyData.score + storyData.descendants > existingStoryScore) {
+                        listAll.insertBefore(newStoryElement, existingStories[i]);
+                        inserted = true;
+                        break;
+                    }
+                }
+                if (!inserted) {
+                    listAll.appendChild(newStoryElement);
+                }
+            } else {
+                listAll.appendChild(newStoryElement);
+            }
         });
 
         addHeartEventListeners();
         addStarEventListeners();
-        addCommentEventListeners(); // Attach comment click listeners
+        addCommentEventListeners();
     }
+
 
     function addCommentEventListeners() {
         document.querySelectorAll('.comment-btn').forEach(button => {
@@ -341,16 +428,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 const storyElement = this.closest('.story');
                 const commentsContainer = storyElement.querySelector('.comments-container');
 
-                if (commentsContainer.style.display === 'none') {
+                if (commentsContainer.style.display === 'block') {
                     if (commentsContainer.innerHTML === '') {
                         const storyData = await getStoryDetails(storyId);
                         if (storyData.kids) {
                             await loadComments(storyData.kids, commentsContainer);
                         }
                     }
+                    else{
+                        commentsContainer.style.display = 'none';
+                    }
+
+                }
+                else {
                     commentsContainer.style.display = 'block';
-                } else {
-                    commentsContainer.style.display = 'none';
                 }
             }
         });
@@ -389,20 +480,19 @@ document.addEventListener('DOMContentLoaded', function() {
         const points = parseInt(pointsSpan.textContent, 10);
 
         if (heart.classList.contains('active')) {
-            // Remove the heart and decrement the points
             heart.classList.remove('active');
             pointsSpan.textContent = points - 1;
-            // Update the points in the backend if needed
+
         } else {
-            // Add the heart and increment the points
             heart.classList.add('active');
             pointsSpan.textContent = points + 1;
-            // Update the points in the backend if needed
+
         }
     }
 
     function handleFilterChange() {
         currentFilterType = filterSelect.value;
+        currentPage = 0;
         fetchTopStories(currentSort, currentTimePeriod, currentFilter);
     }
 
