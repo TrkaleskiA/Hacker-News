@@ -1,4 +1,6 @@
+
 document.addEventListener('DOMContentLoaded', function() {
+    const api= 'https://hacker-news.firebaseio.com/v0';
     const navDivs = document.querySelectorAll('.custom-list .custom-list-div');
     const navItems = document.querySelectorAll('.nav-item .nav-link');
     const searchInput = document.getElementById('searchInput');
@@ -16,70 +18,105 @@ document.addEventListener('DOMContentLoaded', function() {
     let isLoading = false;
     let starredStories = JSON.parse(localStorage.getItem('starredStories')) || {};
 
+    let stopFetching = false;
+    let currentFetchTask = null;
+    async function handleFetchTask(fetchTopStories, currentSort, currentTimePeriod, currentFilter) {
+        if (currentFetchTask) {
+            stopFetching = true;
+            await currentFetchTask;
+        }
+        stopFetching = false;
+        currentFetchTask = fetchTopStories(currentSort, currentTimePeriod, currentFilter);
+    }
+    function getApiUrl(filterType) {
+        switch (filterType) {
 
-    fetchTopStories(currentSort, currentTimePeriod, currentFilter);
+            case 'hot':
+                return `${api}/newstories.json?print=pretty`;
+            case 'show-hn':
+                return `${api}/showstories.json?print=pretty`;
+            case 'ask-hn':
+                return `${api}/askstories.json?print=pretty`;
+            case 'poll':
+                return `${api}/pollstories.json?print=pretty`;
+            case 'job':
+                return `${api}/jobstories.json?print=pretty`;
+            case 'starred':
+                return ''; // No API URL for starred; it uses local storage
+            default:
+                return `${api}/topstories.json?print=pretty`;
+        }
+    }
+
+
+    handleFetchTask(fetchTopStories,currentSort, currentTimePeriod, currentFilter);
+
+    async function handleNavDivsClick(){
+        const filterType = this.id;
+
+        navDivs.forEach(div => div.classList.remove('active'));
+        this.classList.add('active');
+
+        currentFilter = filterType;
+        currentPage = 0; // Reset to the first page
+        document.querySelector('.list-all').innerHTML = '';
+        await handleFetchTask(fetchTopStories,currentSort, currentTimePeriod, currentFilter);
+
+
+        // Enable or disable the dropdown based on the filter type
+        if (filterType === 'all' || filterType === 'starred') {
+            filterSelect.disabled = false;
+            filterSelect.classList.remove('disabled-option');
+            filterSelect.value = 'all';
+        } else {
+            filterSelect.disabled = true;
+            filterSelect.classList.add('disabled-option');
+            filterSelect.value = 'all';
+            currentFilterType = 'all';
+        }
+    }
 
     navDivs.forEach(div => {
-        div.addEventListener('click', function() {
-            const filterType = this.id;
+        div.addEventListener('click', handleNavDivsClick)});
 
-            navDivs.forEach(div => div.classList.remove('active'));
-            this.classList.add('active');
+    async function handleNavItemClick() {
+        const sortType = this.id;
+        navItems.forEach(link => link.classList.remove('active'));
+        this.classList.add('active');
 
-            currentFilter = filterType;
-            currentPage = 0; // Reset to the first page
-            document.querySelector('.list-all').innerHTML = '';
-            fetchTopStories(currentSort, currentTimePeriod, currentFilter);
-
-            // Enable or disable the dropdown based on the filter type
-            if (filterType === 'all' || filterType === 'starred') {
-                filterSelect.disabled = false;
-                filterSelect.classList.remove('disabled-option');
-                filterSelect.value = 'all';
-            } else {
-                filterSelect.disabled = true;
-                filterSelect.classList.add('disabled-option');
-                filterSelect.value = 'all';
-                currentFilterType = 'all';
-            }
-        });
-    });
+        currentSort = sortType === 'sort-by-date' ? 'date' : 'popularity';
+        currentPage = 0; // Reset to the first page
+        document.querySelector('.list-all').innerHTML = '';
+        await handleFetchTask(fetchTopStories, currentSort, currentTimePeriod, currentFilter);
+    }
 
     navItems.forEach(navLink => {
-        navLink.addEventListener('click', function(event) {
-            event.preventDefault();
-            navItems.forEach(link => link.classList.remove('active'));
-            event.target.classList.add('active');
-
-            currentSort = event.target.id === 'sort-by-date' ? 'date' : 'popularity';
-            currentPage = 0;
-            fetchTopStories(currentSort, currentTimePeriod, currentFilter);
-        });
+        navLink.addEventListener('click', handleNavItemClick);
     });
 
     document.querySelectorAll('input[name="time-period"]').forEach(radio => {
-        radio.addEventListener('change', function() {
+        radio.addEventListener('change', async function() {
             currentTimePeriod = getSelectedTimePeriod();
             currentPage = 0; // Reset to the first page
-            fetchTopStories(currentSort, currentTimePeriod, currentFilter);
+            await handleFetchTask(fetchTopStories,currentSort, currentTimePeriod, currentFilter);
         });
     });
 
     let searchTimeout;
     searchInput.addEventListener('input', (event) => {
         clearTimeout(searchTimeout);
-        searchTimeout = setTimeout(() => {
+        searchTimeout = setTimeout(async () => {
             currentSearchText = event.target.value.trim().toLowerCase();
             if (currentSearchText.length >= 2) {
                 currentPage = 0;
                 search = true;
-                fetchTopStories(currentSort, currentTimePeriod, currentFilter); // Call fetchTopStories to reapply the search
+                await handleFetchTask(fetchTopStories,currentSort, currentTimePeriod, currentFilter);
             }
-            else if(currentSearchText.length<1){
+            else if(currentSearchText.length<2){
                 currentPage = 0;
                 search = false;
                 document.querySelector('.list-all').innerHTML = '';
-                fetchTopStories(currentSort,currentTimePeriod,currentFilter);
+                await handleFetchTask(fetchTopStories,currentSort, currentTimePeriod, currentFilter);
 
             }
         }, 750); // 0.75 seconds debounce
@@ -101,6 +138,9 @@ document.addEventListener('DOMContentLoaded', function() {
             else {
                 paginatedStoryIds = await fetchStoryIds(currentSort,currentTimePeriod,currentFilter,start,end)
             }
+
+
+
             if (paginatedStoryIds.length > 0) {
                 isLoading = true;
                 await loadStories(paginatedStoryIds, currentSort, currentTimePeriod);
@@ -111,7 +151,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function getStoryDetails(storyId) {
         try {
-            const response = await fetch(`https://hacker-news.firebaseio.com/v0/item/${storyId}.json?print=pretty`);
+            const response = await fetch(`${api}/item/${storyId}.json?print=pretty`);
             return await response.json();
         } catch (error) {
             console.error(`Error fetching story ${storyId}:`, error);
@@ -136,19 +176,7 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        let apiUrl = 'https://hacker-news.firebaseio.com/v0/topstories.json?print=pretty';
-
-        if (filterType === 'hot') {
-            apiUrl = 'https://hacker-news.firebaseio.com/v0/newstories.json?print=pretty';
-        } else if (filterType === 'show-hn') {
-            apiUrl = 'https://hacker-news.firebaseio.com/v0/showstories.json?print=pretty';
-        } else if (filterType === 'ask-hn') {
-            apiUrl = 'https://hacker-news.firebaseio.com/v0/askstories.json?print=pretty';
-        } else if (filterType === 'poll') {
-            apiUrl = 'https://hacker-news.firebaseio.com/v0/pollstories.json?print=pretty';
-        } else if (filterType === 'job') {
-            apiUrl = 'https://hacker-news.firebaseio.com/v0/jobstories.json?print=pretty';
-        }
+        let apiUrl = getApiUrl(filterType);
 
         try {
             const response = await fetch(apiUrl);
@@ -168,12 +196,12 @@ document.addEventListener('DOMContentLoaded', function() {
             } else {
                 if(!search){
                     let paginatedStoryIds = storyIds.slice(0, storiesPerPage);//Search should not go inside this (It get limited to first 20 Ids) Fixes: storiesPerPage special case changed to max, or when searching dont go inside this if else
-                    loadStories(paginatedStoryIds, sortBy, timePeriod);
+                    await loadStories(paginatedStoryIds, sortBy, timePeriod);
                 }
                 else
                 {
                     let paginatedStoryIds = storyIds.slice(0, 150)
-                    loadStories(paginatedStoryIds, sortBy, timePeriod);
+                    await loadStories(paginatedStoryIds, sortBy, timePeriod);
                 }
 
             }
@@ -192,18 +220,7 @@ document.addEventListener('DOMContentLoaded', function() {
             return storyIds.slice(start, end);
         }
         const fetchIds = async () => {
-            let apiUrl = 'https://hacker-news.firebaseio.com/v0/topstories.json?print=pretty';
-            if (filterType === 'hot') {
-                apiUrl = 'https://hacker-news.firebaseio.com/v0/newstories.json?print=pretty';
-            } else if (filterType === 'show-hn') {
-                apiUrl = 'https://hacker-news.firebaseio.com/v0/showstories.json?print=pretty';
-            } else if (filterType === 'ask-hn') {
-                apiUrl = 'https://hacker-news.firebaseio.com/v0/askstories.json?print=pretty';
-            } else if (filterType === 'poll') {
-                apiUrl = 'https://hacker-news.firebaseio.com/v0/pollstories.json?print=pretty';
-            } else if (filterType === 'job') {
-                apiUrl = 'https://hacker-news.firebaseio.com/v0/jobstories.json?print=pretty';
-            }
+            let apiUrl = getApiUrl(filterType);
 
             try {
                 const response = await fetch(apiUrl);
@@ -230,6 +247,7 @@ document.addEventListener('DOMContentLoaded', function() {
         isLoading = true;
 
         for (let i = 0; i < storyIds.length; i++) {
+            if (stopFetching) break;
             const storyId = storyIds[i];
             const storyData = await getStoryDetails(storyId);
             if (storyData) {
@@ -251,6 +269,7 @@ document.addEventListener('DOMContentLoaded', function() {
         let filteredStories = stories.filter(storyData => {
             const storyDate = new Date(storyData.time * 1000);
             const timeDiff = now - storyDate; // Difference in milliseconds
+            debugger
             const titleMatches = storyData.title.toLowerCase().includes(currentSearchText);
             const authorMatches = storyData.by.toLowerCase().includes(currentSearchText);
             const urlMatches = storyData.url ? storyData.url.toLowerCase().includes(currentSearchText) : false;
@@ -308,7 +327,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function getCommentDetails(commentId) {
         try {
             console.log("getComment")
-            const response = await fetch(`https://hacker-news.firebaseio.com/v0/item/${commentId}.json?print=pretty`);
+            const response = await fetch(`${api}/item/${commentId}.json?print=pretty`);
             return await response.json();
         } catch (error) {
             console.error(`Error fetching comment ${commentId}:`, error);
