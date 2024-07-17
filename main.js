@@ -7,15 +7,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
     let storyIds = [];
     let currentPage = 0;
-    const storiesPerPage = 20;
+    let storiesPerPage = 20;
     let currentSort = 'date';
     let currentTimePeriod = 'forever';
     let currentFilter = 'all'; // Default to 'all'
     let currentSearchText = '';
+    let search = false;
     let isLoading = false;
     let starredStories = JSON.parse(localStorage.getItem('starredStories')) || {};
 
-    console.log(starredStories);
 
     fetchTopStories(currentSort, currentTimePeriod, currentFilter);
 
@@ -65,13 +65,26 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    searchInput.addEventListener('input', function() {
-        currentSearchText = this.value.trim().toLowerCase();
-        if (currentSearchText.length >= 2) {
-            currentPage = 0;
-            fetchTopStories(currentSort, currentTimePeriod, currentFilter);
-        }
+    let searchTimeout;
+    searchInput.addEventListener('input', (event) => {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => {
+            currentSearchText = event.target.value.trim().toLowerCase();
+            if (currentSearchText.length >= 2) {
+                currentPage = 0;
+                search = true;
+                fetchTopStories(currentSort, currentTimePeriod, currentFilter); // Call fetchTopStories to reapply the search
+            }
+            else if(currentSearchText.length<1){
+                currentPage = 0;
+                search = false;
+                document.querySelector('.list-all').innerHTML = '';
+                fetchTopStories(currentSort,currentTimePeriod,currentFilter);
+
+            }
+        }, 750); // 0.75 seconds debounce
     });
+
 
     filterSelect.addEventListener('change', handleFilterChange);
 
@@ -153,8 +166,16 @@ document.addEventListener('DOMContentLoaded', function() {
             if (storyIds.length === 0) {
                 renderNoStoriesMessage();
             } else {
-                const paginatedStoryIds = storyIds.slice(0, storiesPerPage);
-                loadStories(paginatedStoryIds, sortBy, timePeriod);
+                if(!search){
+                    let paginatedStoryIds = storyIds.slice(0, storiesPerPage);//Search should not go inside this (It get limited to first 20 Ids) Fixes: storiesPerPage special case changed to max, or when searching dont go inside this if else
+                    loadStories(paginatedStoryIds, sortBy, timePeriod);
+                }
+                else
+                {
+                    let paginatedStoryIds = storyIds.slice(0, 150)
+                    loadStories(paginatedStoryIds, sortBy, timePeriod);
+                }
+
             }
 
             const endTime = performance.now(); // End timing
@@ -382,7 +403,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         <span><img src="photos/user.png" style="width: 15px; vertical-align: middle; margin-right: 5px;" alt="User">${storyData.by}</span> |
                         <span><img src="photos/clock.png" style="width: 15px; vertical-align: middle; margin-right: 5px;" alt="Clock">${timeAgo}</span> |
                         <a class="story-url" target="_blank" href="${storyData.url}"><span>${storyData.url ? new URL(storyData.url).hostname : ''}</span></a>
-                        <span>${storyData.type}</span>
+                        <span>${storyData.id}</span>
                     </div>
                 </div>
                 <div class="comment-section ms-auto d-flex align-items-center">
