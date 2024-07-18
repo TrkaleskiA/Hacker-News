@@ -106,47 +106,46 @@ document.addEventListener('DOMContentLoaded', function() {
     searchInput.addEventListener('input', (event) => {
         clearTimeout(searchTimeout);
         searchTimeout = setTimeout(async () => {
-            currentSearchText = event.target.value.trim().toLowerCase();
-            if (currentSearchText.length >= 2) {
-                currentPage = 0;
-                search = true;
-                await handleFetchTask(fetchTopStories,currentSort, currentTimePeriod, currentFilter);
-            }
-            else if(currentSearchText.length<2){
-                currentPage = 0;
-                search = false;
-                document.querySelector('.list-all').innerHTML = '';
-                await handleFetchTask(fetchTopStories,currentSort, currentTimePeriod, currentFilter);
-
-            }
+            await handleSearch(event.target.value.trim().toLowerCase());
         }, 750); // 0.75 seconds debounce
     });
+
+// Function to handle search action
+    async function handleSearch(searchText) {
+        currentSearchText = searchText;
+        if (currentSearchText.length >= 2) {
+            currentPage = 0;
+            search = true;
+            await handleFetchTask(fetchTopStories, currentSort, currentTimePeriod, currentFilter);
+        } else {
+            currentPage = 0;
+            search = false;
+            document.querySelector('.list-all').innerHTML = '';
+            await handleFetchTask(fetchTopStories, currentSort, currentTimePeriod, currentFilter);
+        }
+    }
 
 
     filterSelect.addEventListener('change', handleFilterChange);
 
     window.addEventListener('scroll', async () => {
         if ((window.innerHeight + window.scrollY) / document.querySelector('.list-all').scrollHeight >= 0.6 && !isLoading) {
-            currentPage++;
-            const start = currentPage * storiesPerPage;
-            const end = start + storiesPerPage;
-            let paginatedStoryIds
-
-            if (currentFilter === "starred"){
-                paginatedStoryIds = storyIds.slice(start,end);
-            }
-            else {
-                paginatedStoryIds = await fetchStoryIds(currentSort,currentTimePeriod,currentFilter,start,end)
-            }
-
-
-
-            if (paginatedStoryIds.length > 0) {
-                isLoading = true;
-                await loadStories(paginatedStoryIds, currentSort, currentTimePeriod);
-            }
+            await handleScrolled();
         }
     });
+
+    async function handleScrolled(){
+        currentPage++;
+        const start = currentPage * storiesPerPage;
+        const end = start + storiesPerPage;
+        let paginatedStoryIds = storyIds.slice(start, end);
+
+        if (paginatedStoryIds.length > 0) {
+            isLoading = true;
+            await loadStories(paginatedStoryIds, currentSort, currentTimePeriod);
+        }
+
+    }
 
 
     async function getStoryDetails(storyId) {
@@ -162,17 +161,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function fetchTopStories(sortBy, timePeriod, filterType) {
         const startTime = performance.now();
         if (filterType === 'starred') {
-            // Sort starred stories by ID in descending order
-            storyIds = Object.keys(starredStories).sort((a, b) => b - a);
-
-            currentPage = 0;
-            document.querySelector('.list-all').innerHTML = '';
-            const paginatedStoryIds = storyIds.slice(0, storiesPerPage);
-            await loadStories(paginatedStoryIds, sortBy, timePeriod);
-
-            const endTime = performance.now();
-            const duration = ((endTime - startTime) / 1000).toFixed(4); // Calculate duration in seconds
-            resultsCount.textContent = `${storyIds.length} results (${duration} seconds)`;
+            await fetchStarredStories(sortBy,timePeriod,startTime);
             return;
         }
 
@@ -193,18 +182,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
             if (storyIds.length === 0) {
                 renderNoStoriesMessage();
-            } else {
-                if(!search){
-                    let paginatedStoryIds = storyIds.slice(0, storiesPerPage);//Search should not go inside this (It get limited to first 20 Ids) Fixes: storiesPerPage special case changed to max, or when searching dont go inside this if else
-                    await loadStories(paginatedStoryIds, sortBy, timePeriod);
-                }
-                else
-                {
-                    let paginatedStoryIds = storyIds.slice(0, 150)
-                    await loadStories(paginatedStoryIds, sortBy, timePeriod);
-                }
-
             }
+            else {
+                await loadSearchedStories(sortBy,timePeriod);
+            }
+
+
 
             const endTime = performance.now(); // End timing
             const duration = ((endTime - startTime) / 1000).toFixed(4)
@@ -215,30 +198,54 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    async function fetchStoryIds(sortBy, timePeriod, filterType, start, end) {
-        if(filterType === 'starred'){
-            return storyIds.slice(start, end);
-        }
-        const fetchIds = async () => {
-            let apiUrl = getApiUrl(filterType);
+    async function fetchStarredStories(sortBy,timePeriod,startTime){
+        // Sort starred stories by ID in descending order
+        storyIds = Object.keys(starredStories).sort((a, b) => b - a);
 
-            try {
-                const response = await fetch(apiUrl);
-                const storyIds = await response.json();
+        currentPage = 0;
+        document.querySelector('.list-all').innerHTML = '';
+        const paginatedStoryIds = storyIds.slice(0, storiesPerPage);
+        await loadStories(paginatedStoryIds, sortBy, timePeriod);
 
-
-                if (filterType !== 'hot') {
-                    storyIds.sort((a, b) => b - a);
-                }
-
-                return storyIds.slice(start, end);
-            } catch (error) {
-                console.error('Error fetching story IDs:', error);
-            }
-        };
-
-        return fetchIds();
+        const endTime = performance.now();
+        const duration = ((endTime - startTime) / 1000).toFixed(4); // Calculate duration in seconds
+        resultsCount.textContent = `${storyIds.length} results (${duration} seconds)`;
     }
+    async function loadSearchedStories(sortBy,timePeriod) {
+        if (!search) {
+            let paginatedStoryIds = storyIds.slice(0, storiesPerPage);//Search should not go inside this (It get limited to first 20 Ids) Fixes: storiesPerPage special case changed to max, or when searching dont go inside this if else
+            await loadStories(paginatedStoryIds, sortBy, timePeriod);
+        } else {
+            let paginatedStoryIds = storyIds.slice(0, 150)
+            await loadStories(paginatedStoryIds, sortBy, timePeriod);
+        }
+    }
+
+
+    // async function fetchStoryIds(sortBy, timePeriod, filterType, start, end) {
+    //     if(filterType === 'starred'){
+    //         return storyIds.slice(start, end);
+    //     }
+    //     const fetchIds = async () => {
+    //         let apiUrl = getApiUrl(filterType);
+    //
+    //         try {
+    //             const response = await fetch(apiUrl);
+    //             const storyIds = await response.json();
+    //
+    //
+    //             if (filterType !== 'hot') {
+    //                 storyIds.sort((a, b) => b - a);
+    //             }
+    //
+    //             return storyIds.slice(start, end);
+    //         } catch (error) {
+    //             console.error('Error fetching story IDs:', error);
+    //         }
+    //     };
+    //
+    //     return fetchIds();
+    // }
 
 
 
@@ -269,49 +276,19 @@ document.addEventListener('DOMContentLoaded', function() {
         let filteredStories = stories.filter(storyData => {
             const storyDate = new Date(storyData.time * 1000);
             const timeDiff = now - storyDate; // Difference in milliseconds
-            debugger
             const titleMatches = storyData.title.toLowerCase().includes(currentSearchText);
             const authorMatches = storyData.by.toLowerCase().includes(currentSearchText);
             const urlMatches = storyData.url ? storyData.url.toLowerCase().includes(currentSearchText) : false;
             const searchMatches = titleMatches || authorMatches || urlMatches;
 
             let timePeriodMatches = true;
-            switch (timePeriod) {
-                case 'last-24h':
-                    timePeriodMatches = timeDiff < 24 * 60 * 60 * 1000;
-                    break;
-                case 'past-week':
-                    timePeriodMatches = timeDiff < 7 * 24 * 60 * 60 * 1000;
-                    break;
-                case 'past-month':
-                    timePeriodMatches = timeDiff < 30 * 24 * 60 * 60 * 1000;
-                    break;
-                case 'forever':
-                    timePeriodMatches = true;
-                    break;
-            }
+            checkTimePeriodFilter(timePeriod,timePeriodMatches,timeDiff)
             return searchMatches && timePeriodMatches;
         });
 
         // Apply dropdown filter
         if (currentFilter === 'all' || currentFilter === 'starred') {
-            const filterType = filterSelect.value;
-            filteredStories = filteredStories.filter(storyData => {
-                if (filterType === 'story') {
-                    return storyData.type === 'story' || storyData.type === 'show-hn' || storyData.type === 'ask-hn';
-                } else if (filterType === 'comment') {
-                    return storyData.type === 'comment';
-                } else if (filterType === 'poll') {
-                    return storyData.type === 'poll';
-                } else if (filterType === 'job') {
-                    return storyData.type === 'job';
-                } else if (filterType === 'show-hn') {
-                    return storyData.title.startsWith('Show HN:');
-                } else if (filterType === 'ask-hn') {
-                    return storyData.title.startsWith('Ask HN:');
-                }
-                return true;
-            });
+            filteredStories = checkDropdownFilter(filterSelect.value,filteredStories)
         }
 
         // Sort stories
@@ -324,6 +301,42 @@ document.addEventListener('DOMContentLoaded', function() {
         return filteredStories;
     }
 
+    function checkTimePeriodFilter(timePeriod,timePeriodMatches,timeDiff){
+        switch (timePeriod) {
+            case 'last-24h':
+                timePeriodMatches = timeDiff < 24 * 60 * 60 * 1000;
+                break;
+            case 'past-week':
+                timePeriodMatches = timeDiff < 7 * 24 * 60 * 60 * 1000;
+                break;
+            case 'past-month':
+                timePeriodMatches = timeDiff < 30 * 24 * 60 * 60 * 1000;
+                break;
+            case 'forever':
+                timePeriodMatches = true;
+                break;
+        }
+    }
+    function checkDropdownFilter(filterType, stories) {
+        return stories.filter(storyData => {
+            switch (filterType) {
+                case 'story':
+                    return storyData.type === 'story' || storyData.type === 'show-hn' || storyData.type === 'ask-hn';
+                case 'comment':
+                    return storyData.type === 'comment';
+                case 'poll':
+                    return storyData.type === 'poll';
+                case 'job':
+                    return storyData.type === 'job';
+                case 'show-hn':
+                    return storyData.title.startsWith('Show HN:');
+                case 'ask-hn':
+                    return storyData.title.startsWith('Ask HN:');
+                default:
+                    return true;
+            }
+        });
+    }
     async function getCommentDetails(commentId) {
         try {
             console.log("getComment")
@@ -372,10 +385,13 @@ document.addEventListener('DOMContentLoaded', function() {
         const commentId = button.dataset.id;
         const depth = parseInt(button.dataset.depth) + 1;
         const repliesContainer = document.getElementById(`replies-${commentId}`);
+        await displayReplies(button,commentId,depth,repliesContainer)
 
+    }
+    async function displayReplies(button,commentId,depth,repliesContainer){
         if (repliesContainer.style.display === 'block')  {
             const commentData = await getCommentDetails(commentId);
-            if (commentData.kids && repliesContainer.innerHTML === '') {
+            if (commentData.kids && repliesContainer.innerHTML === '') {        //Can be simpler check if elses
                 button.textContent = `Hide Replies`;
                 await loadComments(commentData.kids, repliesContainer, depth);
 
@@ -392,6 +408,7 @@ document.addEventListener('DOMContentLoaded', function() {
             button.textContent = `Hide Replies`;
         }
     }
+
 
     function addRepliesEventListeners() {
         document.querySelectorAll('.replies-btn').forEach(button => {
@@ -422,7 +439,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         <span><img src="photos/user.png" style="width: 15px; vertical-align: middle; margin-right: 5px;" alt="User">${storyData.by}</span> |
                         <span><img src="photos/clock.png" style="width: 15px; vertical-align: middle; margin-right: 5px;" alt="Clock">${timeAgo}</span> |
                         <a class="story-url" target="_blank" href="${storyData.url}"><span>${storyData.url ? new URL(storyData.url).hostname : ''}</span></a>
-                        <span>${storyData.id}</span>
                     </div>
                 </div>
                 <div class="comment-section ms-auto d-flex align-items-center">
